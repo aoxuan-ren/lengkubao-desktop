@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>冷库宝 - RSA 授权码生成器</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+      min-height: 100vh;
+      background: linear-gradient(135deg, #1a3a5c 0%, #0d2137 50%, #162447 100%);
+      display: flex; align-items: center; justify-content: center;
+      padding: 24px; color: #e8edf2;
+    }
+    .card {
+      width: 100%; max-width: 520px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 16px; padding: 32px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    }
+    h1 { text-align: center; font-size: 24px; margin-bottom: 6px; }
+    .sub { text-align: center; font-size: 13px; color: #8ba3bc; margin-bottom: 24px; }
+    label { display: block; font-size: 13px; color: #8ba3bc; margin-bottom: 8px; }
+    .field { margin-bottom: 18px; }
+    input[type="text"], input[type="file"] {
+      width: 100%; padding: 10px 12px; font-size: 14px;
+      background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px; color: #fff;
+    }
+    input[type="text"] { font-family: Consolas, monospace; }
+    .key-status { font-size: 12px; margin-top: 6px; color: #5a7088; }
+    .key-status.ok { color: #2ecc71; }
+    .result-box {
+      background: rgba(77,166,255,0.08);
+      border: 1px solid rgba(77,166,255,0.25);
+      border-radius: 8px; padding: 14px; min-height: 80px;
+      word-break: break-all; font-family: Consolas, monospace;
+      font-size: 13px; color: #4da6ff; line-height: 1.6;
+    }
+    .placeholder { color: #5a7088; font-family: "Microsoft YaHei", sans-serif; }
+    .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+    button {
+      flex: 1; padding: 11px; font-size: 14px; font-weight: 600;
+      border: none; border-radius: 8px; cursor: pointer;
+    }
+    .btn-primary { background: linear-gradient(135deg,#4da6ff,#2d7dd2); color: #fff; }
+    .btn-secondary { background: rgba(255,255,255,0.1); color: #c8d6e5; border: 1px solid rgba(255,255,255,0.15); }
+    .btn-secondary:disabled { opacity: 0.4; cursor: not-allowed; }
+    .hint { margin-top: 18px; font-size: 12px; color: #5a7088; line-height: 1.8; }
+    .error { color: #ff6b6b; font-size: 12px; margin-top: 6px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>冷库宝</h1>
+    <p class="sub">RSA 授权码生成器 · 管理员专用</p>
+
+    <div class="field">
+      <label>私钥文件 (D:\afilessss\lengkubao.desktop\tools\private_key.xml)</label>
+      <input type="file" id="keyFile" accept=".xml">
+      <div class="key-status" id="keyStatus">尚未加载私钥</div>
+    </div>
+
+    <div class="field">
+      <label for="licenseType">授权类型</label>
+      <select id="licenseType" style="width:100%;padding:10px 12px;font-size:14px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.15);border-radius:8px;color:#fff;">
+        <option value="permanent">永久授权</option>
+        <option value="1y">一年期（激活后 1 年过期）</option>
+        <option value="3y">三年期（激活后 3 年过期）</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="machineCode">机器码</label>
+      <input type="text" id="machineCode" placeholder="例如：双清-10899942">
+      <div class="error" id="errorMsg"></div>
+    </div>
+
+    <div class="field">
+      <label>授权码（RSA 签名）</label>
+      <div class="result-box" id="resultBox"><span class="placeholder">加载私钥并输入机器码后生成</span></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn-primary" id="btnGenerate">生成授权码</button>
+      <button class="btn-secondary" id="btnCopy" disabled>复制</button>
+    </div>
+
+    <div class="hint">
+      原理：用<strong>私钥</strong>对机器码做 RSA-SHA256 签名；安装包和软件内只有<strong>公钥</strong>，无法伪造授权码。<br>
+      也可命令行：<code>LicenseVerify.exe sign 机器码</code>（永久）、<code>LicenseVerify.exe sign 机器码 1y</code>（一年）或 <code>LicenseVerify.exe sign 机器码 3y</code>（三年），默认读取 <code>D:\afilessss\lengkubao.desktop\tools\private_key.xml</code>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/forge/1.3.1/forge.min.js"></script>
+  <script>
+    let privateKey = null;
+    let currentCode = '';
+
+    function b64decode(tag) {
+      return forge.util.decode64(tag.textContent.replace(/\s/g, ''));
+    }
+
+    function loadPrivateKeyFromXml(xmlText) {
+      const doc = new DOMParser().parseFromString(xmlText, 'text/xml');
+      if (doc.querySelector('parsererror')) throw new Error('XML 解析失败');
+
+      const toBigInt = (name) => new forge.jsbn.BigInteger(
+        forge.util.bytesToHex(b64decode(doc.getElementsByTagName(name)[0])), 16);
+
+      return forge.pki.setRsaPrivateKey(
+        toBigInt('Modulus'), toBigInt('Exponent'), toBigInt('D'),
+        toBigInt('P'), toBigInt('Q'), toBigInt('DP'), toBigInt('DQ'), toBigInt('InverseQ')
+      );
+    }
+
+    function formatSignature(base64) {
+      let out = '';
+      for (let i = 0; i < base64.length; i++) {
+        if (i > 0 && i % 4 === 0) out += '-';
+        out += base64[i];
+      }
+      return out;
+    }
+
+    function signMachineCode(machineCode, licenseType) {
+      const data = buildPayload(machineCode, licenseType);
+      const md = forge.md.sha256.create();
+      md.update(data, 'utf8');
+      const sig = privateKey.sign(md);
+      return formatSignature(forge.util.encode64(sig));
+    }
+
+    function buildPayload(machineCode, licenseType) {
+      const id = machineCode.trim().toUpperCase();
+      if (licenseType === '1y')
+        return id + '|TRIAL|1Y';
+      if (licenseType === '3y')
+        return id + '|TRIAL|3Y';
+      return id;
+    }
+
+    const keyFile = document.getElementById('keyFile');
+    const licenseType = document.getElementById('licenseType');
+    const keyStatus = document.getElementById('keyStatus');
+    const machineInput = document.getElementById('machineCode');
+    const resultBox = document.getElementById('resultBox');
+    const errorMsg = document.getElementById('errorMsg');
+    const btnGenerate = document.getElementById('btnGenerate');
+    const btnCopy = document.getElementById('btnCopy');
+
+    keyFile.addEventListener('change', function () {
+      const file = keyFile.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function () {
+        try {
+          privateKey = loadPrivateKeyFromXml(reader.result);
+          keyStatus.textContent = '私钥已加载：' + file.name;
+          keyStatus.className = 'key-status ok';
+        } catch (e) {
+          privateKey = null;
+          keyStatus.textContent = '私钥加载失败';
+          keyStatus.className = 'key-status';
+          alert('无法读取私钥：' + e.message);
+        }
+      };
+      reader.readAsText(file);
+    });
+
+    function showError(msg) {
+      errorMsg.textContent = msg;
+      errorMsg.style.display = 'block';
+    }
+
+    btnGenerate.addEventListener('click', function () {
+      errorMsg.style.display = 'none';
+      if (!privateKey) { showError('请先加载 private_key.xml'); return; }
+      const raw = machineInput.value.trim();
+      if (!raw) { showError('请输入机器码'); return; }
+      currentCode = signMachineCode(raw, licenseType.value);
+      resultBox.textContent = currentCode;
+      btnCopy.disabled = false;
+    });
+
+    btnCopy.addEventListener('click', function () {
+      if (!currentCode) return;
+      navigator.clipboard.writeText(currentCode);
+    });
+  </script>
+</body>
+</html>

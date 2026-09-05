@@ -1,0 +1,34 @@
+# 授权私钥（公钥可随程序发布）
+tools/private_key.xml
+tools/public_key.xml
+
+# 杂项
+.cursor/
+*.rar
+vhdl_lab1/
+debug-*.log
+_build_check/
+
+# 证书、授权文件、客户库与导出
+*.pfx
+*.lic
+*.db
+*.db-shm
+*.db-wal
+*.xlsx
+*.xls
+
+# 运行时数据目录（若误放在仓库旁）
+data/
+数据备份/
+Backups/
+恢复前备份/
+publish/
+
+# NuGet / 构建（子目录另有 VisualStudio.gitignore）
+packages/
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo

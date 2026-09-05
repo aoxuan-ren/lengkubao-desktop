@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0.2",
+  "downloadUrl": "https://你的域名/updates/冷库宝_Setup_v1.0.0.2.exe",
+  "releaseNotes": "1. 修复若干问题\n2. 新增自动更新功能",
+  "mandatory": false
+}
